@@ -9,9 +9,9 @@
 (define-constant proposal-deposit u100000)
 (define-constant dilution-bound  u10)
 (define-constant processing-reward  u10000)
-(define-constant summoning-time  (unwrap-panic (get-block-info? time block-height)))
+(define-constant summoning-time  (unwrap-panic (get-block-info? time (- block-height u1))))
 
-(define-constant deposit-token 'ST398K1WZTBVY6FE2YEHM6HP20VSNVSSPJTW0D53M.wrapped-stx)
+(define-constant deposit-token .dao-token)
 
 (define-constant max-voting-period-length u1000000000000000000)
 (define-constant max-grace-period-length u1000000000000000000)
@@ -37,11 +37,11 @@
 
 (define-map token-whitelist ((token principal)) ((approved bool)))
 (define-data-var approved-tokens (list 400 principal)
-  (list 'ST398K1WZTBVY6FE2YEHM6HP20VSNVSSPJTW0D53M.wrapped-token)
+  (list .dao-token)
 )
 
 (begin
-  (map-insert token-whitelist ((token 'ST398K1WZTBVY6FE2YEHM6HP20VSNVSSPJTW0D53M.wrapped-stx))
+  (map-insert token-whitelist ((token .dao-token))
     ((approved true))
   )
 )
@@ -59,9 +59,9 @@
 )
 
 (begin
-  (map-insert members ((member 'ST398K1WZTBVY6FE2YEHM6HP20VSNVSSPJTW0D53M))
+  (map-insert members ((member tx-sender))
     (
-      (delegate-key 'ST398K1WZTBVY6FE2YEHM6HP20VSNVSSPJTW0D53M)
+      (delegate-key tx-sender)
       (shares u1)
       (loot u0)
       (highest-index-yes-vote u0)
@@ -77,8 +77,8 @@
 )
 
 (begin
- (map-insert member-by-delegate-key ((delegate-key 'ST398K1WZTBVY6FE2YEHM6HP20VSNVSSPJTW0D53M))
-    ((member 'ST398K1WZTBVY6FE2YEHM6HP20VSNVSSPJTW0D53M))
+ (map-insert member-by-delegate-key ((delegate-key tx-sender))
+    ((member tx-sender))
   )
 )
 
@@ -110,25 +110,25 @@
 
 (define-data-var proposal-queue (list 100 uint) (list))
 
-(define-private (unsafe-add-balance (user principal) (token principal) (amount uint))
+(define-private (unsafe-add-balance (sender principal) (receiver principal) (token principal) (amount uint))
   (begin
-    (map-set user-token-balance ((user user) (token token))
+    (map-set user-token-balance ((user sender) (token token))
       (
         (amount
-          (+
+          (-
+            (default-to u0 (get amount (map-get? user-token-balance ((user sender) (token token)))))
             amount
-           (default-to u0 (get amount (map-get? user-token-balance ((user user) (token token)))))
           )
         )
       )
     )
 
-    (map-set user-token-balance ((user total) (token token))
+    (map-set user-token-balance ((user receiver) (token token))
       (
         (amount
           (+
             amount
-            (default-to u0 (get amount (map-get? user-token-balance ((user user) (token token)))))
+            (default-to u0 (get amount (map-get? user-token-balance ((user receiver) (token token)))))
           )
         )
       )
@@ -173,10 +173,6 @@
   )
 )
 
-(define-private (contract-of (token <token-trait>))
-  'ST398K1WZTBVY6FE2YEHM6HP20VSNVSSPJTW0D53M.wrapped-stx
-)
-
 (define-private (require-not-too-many-guild-tokens (amount uint) (token principal))
   (if (and
         (> amount u0)
@@ -208,7 +204,7 @@
     (require-not-too-many-guild-tokens tribute-offered (contract-of tribute-token))
 
     (unwrap-panic (contract-call? tribute-token transfer-from? tx-sender (as-contract tx-sender) tribute-offered))
-    (unsafe-add-balance escrow (contract-of tribute-token) tribute-offered)
+    (unsafe-add-balance tx-sender escrow (contract-of tribute-token) tribute-offered)
     (ok (add-proposal (some applicant) shares-requested loot-requested tribute-offered tribute-token payment-requested payment-token details (list)))
   )
 )
@@ -324,8 +320,60 @@
   )
 )
 
-(define-public (submit-vote)
+(define-private (submit-yes-vote (member principal) (proposal (tuple
+    (applicant (optional principal))
+    (proposer principal)
+    (sponsor (optional principal))
+    (shares-requested uint)
+    (loot-requested uint)
+    (tribute-offered uint)
+    (tribute-token principal)
+    (payment-requested uint)
+    (payment-token principal)
+    (starting-period uint)
+    (yes-votes uint)
+    (no-votes uint)
+    (flags (list 6 bool))
+    (details (buff 256))
+    (max-total-shares-and-loot-at-yes-votes uint)
+  )) (proposal-index uint))
   (ok true)
+)
+
+(define-private (submit-no-vote (member principal) (proposal (tuple
+    (applicant (optional principal))
+    (proposer principal)
+    (sponsor (optional principal))
+    (shares-requested uint)
+    (loot-requested uint)
+    (tribute-offered uint)
+    (tribute-token principal)
+    (payment-requested uint)
+    (payment-token principal)
+    (starting-period uint)
+    (yes-votes uint)
+    (no-votes uint)
+    (flags (list 6 bool))
+    (details (buff 256))
+    (max-total-shares-and-loot-at-yes-votes uint)
+  )) (proposal-index uint))
+  (ok true)
+)
+
+
+(define-public (submit-vote (proposal-index uint) (vote bool))
+  (let (
+      (proposal (unwrap-panic (map-get? proposals {index: proposal-index})))
+      (member (unwrap-panic (get member (map-get? member-by-delegate-key {delegate-key: tx-sender}))))
+    )
+    (begin
+      (if (is-eq vote true)
+        (submit-yes-vote member proposal proposal-index)
+        (submit-no-vote member proposal proposal-index)
+      )
+      (ok true)
+    )
+  )
 )
 
 (define-public (process-proposal)

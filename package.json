@@ -15,16 +15,31 @@
     "test:watch": "mocha --watch"
   },
   "devDependencies": {
+    "@types/chai": "^4.2.14",
+    "@types/mocha": "^8.0.4",
     "@types/node": "^10",
-    "typescript": "^3.5.2",
-    "ts-node": "^8.2.0",
     "chai": "^4.2.0",
-    "@types/chai": "^4.1.7",
-    "mocha": "^6.1.4",
-    "@types/mocha": "^5.2.7"
+    "mocha": "^8.2.1",
+    "ts-node": "^9.0.0",
+    "typescript": "^4.0.5"
   },
   "dependencies": {
-    "@blockstack/clarity": "^0.1.16",
-    "@blockstack/clarity-native-bin": "^0.1.16"
+    "@blockstack/clarity": "^0.3.0",
+    "@blockstack/clarity-native-bin": "^0.3.0",
+    "@stacks/network": "^1.0.0-beta.9",
+    "@stacks/transactions": "^1.0.0-beta.9",
+    "fs": "^0.0.1-security"
+  },
+  "mocha": {
+    "require": [
+      "ts-node/register/transpile-only",
+      "source-map-support/register"
+    ],
+    "extension": [
+      "ts",
+      "clar"
+    ],
+    "timeout": 0,
+    "recursive": true
   }
 }
