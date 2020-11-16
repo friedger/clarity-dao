@@ -187,8 +187,8 @@
   )
 )
 
-(define-private require-true (value bool))
-  (unwrap-panic (if value (some true) none)
+(define-private (require-true (value bool))
+  (unwrap-panic (if value (some true) none))
 )
 
 (define-private (require-no-vote (value (optional ((vote (optional bool))))))
@@ -419,7 +419,7 @@
           )
         )
 
-        (update-proposal proposal-id proposal (get-starting-period) (get member (map-get? member-by-delegate-key {delegate-key tx-sender})))
+        (update-proposal proposal-id proposal (get-starting-period) (get member (map-get? member-by-delegate-key {delegate-key: tx-sender})))
         (let ((proposal-index (inc-proposal-queue-length)))
           (require-true (map-insert proposal-queue {index: proposal-index} {id: proposal-id }))
         )
@@ -486,6 +486,25 @@
   )
 )
 
+(define-private (update-member (member prinicpal) (member-data
+ (
+    (delegate-key principal)
+    (shares uint)
+    (loot uint)
+    (highest-index-yes-vote uint)
+    (jailed uint)
+  )) (index uint))
+  (map-set members {member: member}
+    {
+      delegate-key: (get delegate-key member-data),
+      shares: (get shares member-data),
+      loot: (get loot member-data),
+      highest-index-yes-vote: index,
+      jailed: (get jailed member-data)
+
+    }
+  )
+)
 
 (define-public (submit-vote (proposal-index uint) (vote (optional bool)))
   (let (
@@ -500,7 +519,15 @@
         (require-in-voting-period starting-period)
         (require-true (map-insert votes-by-member {proposal-index: proposal-index, member: member} {vote: vote}))
         (match vote
-          yes-no-vote (update-proposal-for-vote member proposal proposal-index yes-no-vote)
+          yes-no-vote (begin
+              (if yes-no-vote (let ((index (get highest-index-yes-vote member)))
+                                    (if (> proposal-index index)
+                                      (update-member member (unwrap-panic (map-get? members {member: member})) index)
+                                      true
+                                    ))
+                              true)
+              (update-proposal-for-vote member proposal proposal-index yes-no-vote)
+            )
           true ;; abstention
         )
         (ok true)
