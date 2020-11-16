@@ -109,7 +109,7 @@
   )
 )
 
-(define-map votes-by-member ((proposal uint) (member principal))
+(define-map votes-by-member ((proposal-index uint) (member principal))
   (
     (vote (optional bool))
   )
@@ -148,6 +148,10 @@
   (var-set proposal-count (+ u1 (var-get proposal-count)))
 )
 
+(define-private (inc-proposal-queue-length)
+  (var-set proposal-queue-length (+ u1 (var-get proposal-queue-length)))
+)
+
 (define-private (add-proposal (user (optional principal)) (shares-requested uint) (loot-requested uint)
   (tribute-offered uint)
   (tribute-token <token-trait>)
@@ -179,6 +183,25 @@
       )
       (var-set proposal-count id)
       id
+    )
+  )
+)
+
+(define-private require-true (value bool))
+  (unwrap-panic (if value (some true) none)
+)
+
+(define-private (require-no-vote (value (optional ((vote (optional bool))))))
+  (unwrap-panic (match value
+      some-value none
+      (some true)
+    )
+  )
+)
+
+(define-private (reqrequire-in-voting-period (starting-period uint))
+  (let ((current-period (get-current-period)))
+    (require-true (and (>= current-period start-period) (< current-period (+ starting-period voting-period-length))))
   )
 )
 
@@ -328,7 +351,7 @@
     (max-total-shares-and-loot-at-yes-votes uint)
   )) (starting-period uint) (sponsor principal))
 
-  (map-set proposals {id: proposal-index}
+  (map-set proposals {id: proposal-id}
         (
           (applicant (get applicant proposal))
           (proposer (get proposer proposal))
@@ -366,11 +389,11 @@
   )
 )
 
-(define-public (sponsor-proposal (proposal-index uint))
+(define-public (sponsor-proposal (proposal-id uint))
   (begin
     (unwrap-panic (contract-call? deposit-token transfer-from? tx-sender escrow proposal-deposit))
     (unsafe-add-balance tx-sender escrow deposit-token proposal-deposit)
-    (let ((proposal (unwrap-panic (map-get? proposals ((index proposal-index ))))))
+    (let ((proposal (unwrap-panic (map-get? proposals ((index proposal-id ))))))
       (begin
         (require-not-true u0 (get flags proposal))
         (require-not-true u3 (get flags proposal))
@@ -396,15 +419,25 @@
           )
         )
 
-        (update-proposal proposal-index proposal (get-starting-period) (get member (map-get? member-by-delegate-key {delegate-key tx-sender})))
-        (map-insert proposal-queue {index: proposal-index} {id: //TODO })
+        (update-proposal proposal-id proposal (get-starting-period) (get member (map-get? member-by-delegate-key {delegate-key tx-sender})))
+        (let ((proposal-index (inc-proposal-queue-length)))
+          (require-true (map-insert proposal-queue {index: proposal-index} {id: proposal-id }))
+        )
         (ok true)
       )
     )
   )
 )
 
-(define-private (submit-yes-vote (member principal) (proposal (tuple
+(define-private (update-proposal-for-vote
+(member (tuple
+    (delegate-key principal)
+    (shares uint)
+    (loot uint)
+    (highest-index-yes-vote uint)
+    (jailed uint)
+))
+(proposal (tuple
     (applicant (optional principal))
     (proposer principal)
     (sponsor (optional principal))
@@ -420,42 +453,58 @@
     (flags (list 6 bool))
     (details (buff 256))
     (max-total-shares-and-loot-at-yes-votes uint)
-  )) (proposal-index uint))
-  (ok true)
+  ))
+  (proposal-index uint) (vote bool))
+  (let ((shares (get shares member))
+      (total-tokens (+ (vat-get total-shares) (var-get total-loot)))
+      (max-total (get max-total-shares-and-loot-at-yes-votes proposal))
+    )
+    (map-set proposals {id: (unwrap-panic (get id (map-get? proposal-queue {proposal-index: proposal-index})))}
+        (
+          (applicant (get applicant proposal))
+          (proposer (get proposer proposal))
+          (sponsor (get sponsor proposal))
+          (shares-requested (get shares-requested proposal))
+          (loot-requested (get loot-requested proposal))
+          (tribute-offered (get tribute-offered proposal))
+          (tribute-token (get tribute-token proposal))
+          (payment-requested (get payment-requested proposal))
+          (payment-token (get payment-token proposal))
+          (starting-period (get starting-period proposal))
+          (yes-votes (if vote (+ (get yes-votes proposal) shares)))
+          (no-votes (if vote (get no-votes proposal) (+ (get no-votes proposal) shares)))
+          (flags (get flags proposal))
+          (details (get details proposal))
+          (max-total-shares-and-loot-at-yes-votes
+            (if vote
+              (if (> total-tokens max-total) total-tokens max-total)
+              max-total
+            )
+          )
+        )
+      )
+  )
 )
 
-(define-private (submit-no-vote (member principal) (proposal (tuple
-    (applicant (optional principal))
-    (proposer principal)
-    (sponsor (optional principal))
-    (shares-requested uint)
-    (loot-requested uint)
-    (tribute-offered uint)
-    (tribute-token principal)
-    (payment-requested uint)
-    (payment-token principal)
-    (starting-period uint)
-    (yes-votes uint)
-    (no-votes uint)
-    (flags (list 6 bool))
-    (details (buff 256))
-    (max-total-shares-and-loot-at-yes-votes uint)
-  )) (proposal-index uint))
-  (ok true)
-)
 
-
-(define-public (submit-vote (proposal-index uint) (vote bool))
+(define-public (submit-vote (proposal-index uint) (vote (optional bool)))
   (let (
-      (proposal (unwrap-panic (map-get? proposals {index: proposal-index})))
+      (proposal (unwrap-panic (map-get? proposal-queue {index: proposal-index})))
       (member (unwrap-panic (get member (map-get? member-by-delegate-key {delegate-key: tx-sender}))))
     )
-    (begin
-      (if (is-eq vote true)
-        (submit-yes-vote member proposal proposal-index)
-        (submit-no-vote member proposal proposal-index)
+    (let (
+        (starting-period (get starting-period proposal))
       )
-      (ok true)
+      (begin
+        (require-no-vote (map-get? votes-by-member {proposal-index: proposal-index, member: member}))
+        (require-in-voting-period starting-period)
+        (require-true (map-insert votes-by-member {proposal-index: proposal-index, member: member} {vote: vote}))
+        (match vote
+          yes-no-vote (update-proposal-for-vote member proposal proposal-index yes-no-vote)
+          true ;; abstention
+        )
+        (ok true)
+      )
     )
   )
 )
