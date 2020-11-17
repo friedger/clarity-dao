@@ -55,7 +55,11 @@ function timeout(ms: number) {
 
 describe("dao test suite", () => {
   before("deploys", async () => {
-    let result = await deployContract("dao-token");
+    let result = await deployContract("dao-token-trait");
+    if (!((result as unknown) as TxBroadcastResultRejected).error) {
+      await timeout(10000);
+    }
+    result = await deployContract("dao-token");
     if (!((result as unknown) as TxBroadcastResultRejected).error) {
       await timeout(10000);
     }
