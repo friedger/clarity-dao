@@ -6,38 +6,34 @@ import {
 } from "@blockstack/clarity";
 import { assert } from "chai";
 
-describe("dao contract test suite", () => {
-  let daoClient: Client;
-  let tokenClient: Client;
-  let tokenTraitClient: Client;
+describe("dao token contract test suite", () => {
+  let daoTokenClient: Client;
+  let daoTokenTraitClient: Client;
   let provider: Provider;
 
   before(async () => {
     provider = await ProviderRegistry.createProvider();
-    daoClient = new Client(
-      "S1G2081040G2081040G2081040G208105NK8PE5.dao",
-      "dao",
-      provider
-    );
-    tokenClient = new Client(
-      "S1G2081040G2081040G2081040G208105NK8PE5.dao-token",
-      "dao-token",
-      provider
-    );
-    tokenTraitClient = new Client(
+    daoTokenTraitClient = new Client(
       "S1G2081040G2081040G2081040G208105NK8PE5.dao-token-trait",
       "dao-token-trait",
+      provider
+    );
+    daoTokenClient = new Client(
+      "S1G2081040G2081040G2081040G208105NK8PE5.dao-token",
+      "dao-token",
       provider
     );
   });
 
   it("should have a valid syntax", async () => {
-    await tokenTraitClient.deployContract();
-    await tokenClient.deployContract();
-    await daoClient.checkContract();
+    await daoTokenTraitClient.deployContract();
+    await daoTokenClient.checkContract();
   });
 
   describe("deploying an instance of the contract", () => {
+    before(async () => {
+      await daoTokenClient.deployContract();
+    });
     it("should run", async () => {
       await provider.eval(
         "S1G2081040G2081040G2081040G208105NK8PE5.dao-token",

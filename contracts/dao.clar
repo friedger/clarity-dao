@@ -116,29 +116,49 @@
 (define-map proposal-queue ((index uint)) ((id uint)))
 (define-data-var proposal-queue-length uint u0)
 
-(define-private (unsafe-add-balance (sender principal) (receiver principal) (token principal) (amount uint))
+(define-private (unsafe-add-to-balance (user principal) (token principal) (amount uint))
   (begin
-    (map-set user-token-balance ((user sender) (token token))
-      (
-        (amount
-          (-
-            (default-to u0 (get amount (map-get? user-token-balance ((user sender) (token token)))))
-            amount
-          )
-        )
-      )
+    (map-set user-token-balance {user: user, token: token}
+      {amount: (+
+            (default-to u0 (get amount (map-get? user-token-balance {user: user, token: token})))
+            amount)}
     )
 
-    (map-set user-token-balance ((user receiver) (token token))
-      (
-        (amount
-          (+
-            amount
-            (default-to u0 (get amount (map-get? user-token-balance ((user receiver) (token token)))))
-          )
-        )
-      )
+    (map-set user-token-balance {user: total, token: token}
+      {amount: (+
+            (default-to u0 (get amount (map-get? user-token-balance {user: total, token: token})))
+            amount)}
     )
+  )
+)
+
+(define-private (unsafe-substract-from-balance (user principal) (token principal) (amount uint))
+  (begin
+    (map-set user-token-balance {user: user, token: token}
+      {amount: (-
+            (default-to u0 (get amount (map-get? user-token-balance {user: user, token: token})))
+            amount)}
+    )
+
+    (map-set user-token-balance {user: total, token: token}
+      {amount: (-
+            (default-to u0 (get amount (map-get? user-token-balance {user: total, token: token})))
+            amount)}
+    )
+  )
+)
+
+(define-private (unsafe-internal-transfer (sender principal) (receiver principal) (token principal) (amount uint))
+  (begin
+    (unsafe-substract-from-balance sender token amount)
+    (unsafe-add-to-balance receiver token amount)
+  )
+)
+
+(define-private (return-deposit (sponsor principal))
+  (begin
+    (unsafe-internal-transfer escrow tx-sender deposit-token processing-reward)
+    (unsafe-internal-transfer escrow sponsor deposit-token (- proposal-deposit processing-reward))
   )
 )
 
@@ -261,7 +281,7 @@
     (require-not-too-many-guild-tokens tribute-offered (contract-of tribute-token))
 
     (unwrap-panic (contract-call? tribute-token transfer-from? tx-sender (as-contract tx-sender) tribute-offered))
-    (unsafe-add-balance tx-sender escrow (contract-of tribute-token) tribute-offered)
+    (unsafe-add-to-balance escrow (contract-of tribute-token) tribute-offered)
     (ok (add-proposal (some applicant) shares-requested loot-requested tribute-offered tribute-token payment-requested payment-token details (list)))
   )
 )
@@ -291,15 +311,15 @@
 (define-public (sponsor-proposal (proposal-id uint))
   (begin
     (unwrap-panic (contract-call? .dao-token transfer-from? tx-sender escrow proposal-deposit))
-    (unsafe-add-balance tx-sender escrow deposit-token proposal-deposit)
-    (let ((proposal (unwrap-panic (map-get? proposals ((id proposal-id ))))))
+    (unsafe-add-to-balance escrow deposit-token proposal-deposit)
+    (let ((proposal (unwrap-panic (map-get? proposals {id: proposal-id}))))
       (begin
         (require-false u0 (get flags proposal))
         (require-false u3 (get flags proposal))
         (require-not-jailed (get applicant proposal))
         (require-not-too-many-guild-tokens (get tribute-offered proposal) (get tribute-token proposal))
 
-        (if (unwrap-panic (get-flag u4 (get flags proposal)))
+        (if (get-flag u4 (get flags proposal))
           (let ((token-to-whitelist (get tribute-token proposal)))
             (begin
               (unwrap-panic (if (match (get approved (map-get? token-whitelist {token: token-to-whitelist}))
@@ -309,24 +329,91 @@
                               none))
               (unwrap-panic (map-get? proposed-to-whitelist {token: token-to-whitelist}))
               (unwrap-panic (if (map-insert proposed-to-whitelist {token: token-to-whitelist} {proposed: true}) (some true) none))
+              true
             )
           )
-          (if (unwrap-panic (get-flag u4 (get flags proposal)))
-            (let ((member  (unwrap-panic (get applicant proposal))))
+          (if (get-flag u4 (get flags proposal))
+            (let ((member (unwrap-panic (get applicant proposal))))
               (begin
                 (require-not-proposed-to-kick member)
                 (map-insert proposed-to-kick {member: member} {proposed: true})
               )
             )
-            true
+           true
           )
         )
 
-        (update-proposal proposal-id proposal (get-starting-period) (unwrap-panic (get member (map-get? member-by-delegate-key {delegate-key: tx-sender}))))
+        (update-proposal-for-sponsoring proposal-id proposal (get-starting-period) (unwrap-panic (get member (map-get? member-by-delegate-key {delegate-key: tx-sender}))))
         (let ((proposal-index (inc-proposal-queue-length)))
           (require-true (map-insert proposal-queue {index: proposal-index} {id: proposal-id }))
         )
         (ok true)
+      )
+    )
+  )
+)
+
+
+(define-public (process-proposal (proposal-index uint))
+  (begin
+    (validate-proposal-for-processing proposal-index)
+    (let ((proposal-id (id-queued-proposal proposal-index)))
+      (let ((proposal (unwrap-panic (get-proposal-by-index? proposal-index))))
+        (begin
+          (require-true (and (not (get-flag u4 (get flags proposal))) (not (get-flag u5 (get flags proposal)))))
+
+          (update-proposal-for-processing proposal-id proposal)
+          (if (and (did-pass proposal)
+                  (<= (+ (var-get total-shares) (var-get total-loot)
+                          (get shares-requested proposal)
+                          (get loot-requested proposal)
+                      )
+                      max-number-of-shares-and-loot)
+                  ;; todo: check payment requested
+                  ;; todo: non-zero balance guide accounts
+            )
+            ;; proposal did pass
+            (begin
+                (update-proposal-for-passed-vote proposal-id proposal)
+
+                (match (get applicant proposal)
+                  applicant (match (map-get? members {member: applicant})
+                    member-data (update-member-shares-and-loot applicant member-data (get shares-requested proposal) (get loot-requested proposal))
+                    (begin
+                      ;; if the applicant address is already taken by a member's delegateKey, reset it to their member address
+                      (match (get member (map-get? member-by-delegate-key {delegate-key: applicant}))
+                        member-to-override (begin
+                            (map-set member-by-delegate-key {delegate-key: member-to-override} {member: member-to-override})
+                            (update-member-delegate-key member-to-override))
+                        true
+                      )
+                      (map-set members {member: applicant}
+                        {
+                          delegate-key: applicant,
+                          shares: (get shares-requested proposal),
+                          loot: (get loot-requested proposal),
+                          highest-index-yes-vote: u0,
+                          jailed: u0
+                        })
+                      (map-set member-by-delegate-key {delegate-key: applicant} {member: applicant})
+                    ))
+                  true
+                )
+                (var-set total-shares (+ (var-get total-shares) (get shares-requested proposal)))
+                (var-set total-loot (+ (var-get total-loot) (get loot-requested proposal)))
+                ;; if the proposal tribute is the first tokens of its kind to make it into the guild bank, increment total guild bank tokens
+                (update-total-guild-bank-tokens-for-tribute (get payment-token proposal) (get payment-requested proposal))
+                (unsafe-internal-transfer escrow guild (get tribute-token proposal) (get tribute-offered proposal))
+                (unsafe-internal-transfer guild (unwrap-panic (get applicant proposal)) (get payment-token proposal) (get payment-requested proposal))
+                ;; if the proposal spends 100% of guild bank balance for a token, decrement total guild bank tokens
+                (update-total-guild-bank-tokens-for-payment (get payment-token proposal) (get payment-requested proposal))
+            )
+            ;; proposal did not pass
+            (unsafe-internal-transfer escrow (get proposer proposal) (get tribute-token proposal) (get tribute-offered proposal))
+          )
+          (return-deposit (unwrap-panic (get sponsor proposal)))
+          (ok true)
+        )
       )
     )
   )
@@ -350,6 +437,10 @@
 )
 
 (define-private (get-flag (index uint) (list-of-flags (list 6 bool)))
+  (unwrap-panic (get-flag? index list-of-flags))
+)
+
+(define-private (get-flag? (index uint) (list-of-flags (list 6 bool)))
   (get result
       (fold get-by-index list-of-flags {current-index: u0, requested-index: index, result: none})
   )
@@ -372,8 +463,34 @@
   (get result (fold set-by-index list-of-flags {current-index: u0, requested-index: index, result: (list)}))
 )
 
+(define-private (did-pass
+  (proposal (tuple
+    (applicant (optional principal))
+    (proposer principal)
+    (sponsor (optional principal))
+    (shares-requested uint)
+    (loot-requested uint)
+    (tribute-offered uint)
+    (tribute-token principal)
+    (payment-requested uint)
+    (payment-token principal)
+    (starting-period uint)
+    (yes-votes uint)
+    (no-votes uint)
+    (flags (list 6 bool))
+    (details (buff 256))
+    (max-total-shares-and-loot-at-yes-votes uint)
+  )))
+
+  (and
+    (> (get yes-votes proposal) (get no-votes proposal))
+    (>= (* (+ (var-get total-shares) (var-get total-loot)) dilution-bound)
+      (get max-total-shares-and-loot-at-yes-votes proposal))
+    (is-eq u0 (unwrap-panic (get jailed (map-get? members {member: (unwrap-panic (get applicant proposal))})))))
+)
+
 (define-private (require-false (index uint) (flags (list 6 bool)))
-  (unwrap-panic (match (get-flag index flags)
+  (unwrap-panic (match (get-flag? index flags)
                       flag (if flag none (some true))
                       (some true)
                     )
@@ -418,16 +535,31 @@
         (let ((length (var-get proposal-queue-length)))
           (if (is-eq length u0)
             u0
-            (unwrap-panic (get starting-period (map-get? proposals {id: (id-queued-proposal (- length u1))}))))))
+            (unwrap-panic (get starting-period (get-proposal-by-index? (- length u1)))))))
       (current-period (get-current-period)))
     (+ u1 (if (> last-period current-period) last-period current-period))
+  )
+)
+
+(define-read-only (get-proposal-by-index? (proposal-index uint))
+  (map-get? proposals {id: (id-queued-proposal proposal-index)})
+)
+
+(define-private (validate-proposal-for-processing (proposal-index uint))
+  (let ((proposal (unwrap-panic (get-proposal-by-index? (id-queued-proposal proposal-index)))))
+    (begin
+      (asserts! (< proposal-index  (var-get proposal-queue-length)) (err "proposal does not exist"))
+      (asserts! (>= (get-current-period) (get starting-period proposal)) (err "proposal not ready to be processed"))
+      (asserts! (not (get-flag u1 (get flags proposal))) (err "proposal has already been processed"))
+      (asserts! (or (is-eq proposal-index u0) (get-flag u1 (get flags (unwrap-panic (get-proposal-by-index? (- proposal-index u1)))))) (err "previous proposal must be processed")))
+      (ok true)
   )
 )
 
 ;;
 ;; private functions changing the state
 ;;
-(define-private (update-proposal (proposal-id uint)
+(define-private (update-proposal-for-sponsoring (proposal-id uint)
 (proposal (tuple
     (applicant (optional principal))
     (proposer principal)
@@ -539,13 +671,145 @@
   )
 )
 
+(define-private (update-member-shares-and-loot (member principal) (member-data (tuple (delegate-key principal) (shares uint) (loot uint) (highest-index-yes-vote uint) (jailed uint))) (shares uint) (loot uint))
+  (map-set members {member: member}
+    {
+      delegate-key: (get delegate-key member-data),
+      shares: (+ shares (get shares member-data)),
+      loot: (+ loot (get loot member-data)),
+      highest-index-yes-vote: (get highest-index-yes-vote member-data),
+      jailed: (get jailed member-data)}
+  )
+)
+
+(define-private (update-member-delegate-key (member principal))
+  (match (map-get? members {member: member})
+    member-data (map-set members {member: member}
+      {
+        delegate-key: member,
+        shares: (get shares member-data),
+        loot: (get loot member-data),
+        highest-index-yes-vote: (get highest-index-yes-vote member-data),
+        jailed: (get jailed member-data)})
+    true
+  )
+)
+
+
+(define-private (update-proposal-for-processing (proposal-id uint)
+  (proposal (tuple
+    (applicant (optional principal))
+    (proposer principal)
+    (sponsor (optional principal))
+    (shares-requested uint)
+    (loot-requested uint)
+    (tribute-offered uint)
+    (tribute-token principal)
+    (payment-requested uint)
+    (payment-token principal)
+    (starting-period uint)
+    (yes-votes uint)
+    (no-votes uint)
+    (flags (list 6 bool))
+    (details (buff 256))
+    (max-total-shares-and-loot-at-yes-votes uint)
+  )))
+
+  (map-set proposals {id: proposal-id}
+        (
+          (applicant (get applicant proposal))
+          (proposer (get proposer proposal))
+          (sponsor (get sponsor proposal))
+          (shares-requested (get shares-requested proposal))
+          (loot-requested (get loot-requested proposal))
+          (tribute-offered (get tribute-offered proposal))
+          (tribute-token (get tribute-token proposal))
+          (payment-requested (get payment-requested proposal))
+          (payment-token (get payment-token proposal))
+          (starting-period (get starting-period proposal))
+          (yes-votes (get yes-votes proposal))
+          (no-votes (get no-votes proposal))
+          (flags (set-flag u2 (get flags proposal))) ;; set passed to true
+          (details (get details proposal))
+          (max-total-shares-and-loot-at-yes-votes (get max-total-shares-and-loot-at-yes-votes proposal))
+        )
+      )
+)
+
+(define-private (update-proposal-for-passed-vote (proposal-id uint)
+  (proposal (tuple
+    (applicant (optional principal))
+    (proposer principal)
+    (sponsor (optional principal))
+    (shares-requested uint)
+    (loot-requested uint)
+    (tribute-offered uint)
+    (tribute-token principal)
+    (payment-requested uint)
+    (payment-token principal)
+    (starting-period uint)
+    (yes-votes uint)
+    (no-votes uint)
+    (flags (list 6 bool))
+    (details (buff 256))
+    (max-total-shares-and-loot-at-yes-votes uint)
+  )))
+
+  (map-set proposals {id: proposal-id}
+        (
+          (applicant (get applicant proposal))
+          (proposer (get proposer proposal))
+          (sponsor (get sponsor proposal))
+          (shares-requested (get shares-requested proposal))
+          (loot-requested (get loot-requested proposal))
+          (tribute-offered (get tribute-offered proposal))
+          (tribute-token (get tribute-token proposal))
+          (payment-requested (get payment-requested proposal))
+          (payment-token (get payment-token proposal))
+          (starting-period (get starting-period proposal))
+          (yes-votes (get yes-votes proposal))
+          (no-votes (get no-votes proposal))
+          (flags (set-flag u1 (get flags proposal))) ;; set processes to true
+          (details (get details proposal))
+          (max-total-shares-and-loot-at-yes-votes (get max-total-shares-and-loot-at-yes-votes proposal))
+        )
+      )
+)
+
+(define-private (update-total-guild-bank-tokens-for-tribute (tribute-token principal) (amount uint))
+  (match (get amount (map-get? user-token-balance {user: guild, token: tribute-token}))
+    balance (if (and
+                  (is-eq balance u0)
+                  (> amount u0))
+                (var-set total-guild-bank-token-count (+ (var-get total-guild-bank-token-count) u1))
+                true
+            )
+    true
+  )
+)
+
+(define-private (update-total-guild-bank-tokens-for-payment  (payment-token principal) (amount uint))
+  (match (get amount (map-get? user-token-balance {user: guild, token: payment-token}))
+      balance (if (and
+                    (is-eq balance u0)
+                    (> amount u0))
+                  (var-set total-guild-bank-token-count (- (var-get total-guild-bank-token-count) u1))
+                  true
+              )
+      true
+    )
+)
+
+;;
+;; members can submit a vote to proposal
+;; If vote is none it counts as abstention, i.e. are only registered on chain and don't have an impact on the result
+;;
 (define-public (submit-vote (proposal-index uint) (vote (optional bool)))
   (let (
-      (proposal (unwrap-panic (map-get? proposals (unwrap-panic (map-get? proposal-queue {index: proposal-index})))))
+      (proposal (unwrap-panic (get-proposal-by-index? proposal-index)))
       (member (unwrap-panic (get member (map-get? member-by-delegate-key {delegate-key: tx-sender}))))
     )
     (let (
-
         (starting-period (get starting-period proposal))
       )
       (begin
@@ -570,10 +834,6 @@
       )
     )
   )
-)
-
-(define-public (process-proposal)
-  (ok true)
 )
 
 (define-public (process-whitelist-proposal)
