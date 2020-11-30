@@ -44,6 +44,7 @@
 (define-data-var approved-tokens (list 400 principal)
   (list deposit-token)
 )
+(define-data-var approved-token-count uint u0)
 
 (begin
   (map-insert token-whitelist {token: deposit-token}
@@ -239,8 +240,8 @@
   )
 )
 
-(define-private (require-not-too-many-whitelisted-tokens (token principal))
-  (unwrap-panic (if (< (len (var-get approved-tokens)) max-token-whitelist-count) (some true) none))
+(define-private (require-not-too-many-whitelisted-tokens)
+  (unwrap-panic (if (< (var-get approved-token-count) max-token-whitelist-count) (some true) none))
 )
 
 (define-private (require-member-shares-or-loot
@@ -411,6 +412,35 @@
             ;; proposal did not pass
             (unsafe-internal-transfer escrow (get proposer proposal) (get tribute-token proposal) (get tribute-offered proposal))
           )
+          (return-deposit (unwrap-panic (get sponsor proposal)))
+          (ok true)
+        )
+      )
+    )
+  )
+)
+
+
+(define-public (process-whitelist-proposal (proposal-index uint))
+ (begin
+    (validate-proposal-for-processing proposal-index)
+    (let ((proposal-id (id-queued-proposal proposal-index)))
+      (let ((proposal (unwrap-panic (get-proposal-by-index? proposal-index))))
+        (begin
+          (require-true (and (get-flag u4 (get flags proposal))))
+          (update-proposal-for-processing proposal-id proposal)
+          (if (and (did-pass proposal)
+                (< (var-get approved-token-count) max-token-whitelist-count))
+            (begin
+              (update-proposal-for-passed-vote proposal-id proposal)
+              (map-insert token-whitelist {token: (get tribute-token proposal)}
+                {approved: true})
+              (var-set approved-tokens (unwrap-panic (as-max-len? (append (var-get approved-tokens) (get tribute-token proposal)) u400)))
+              (var-set approved-token-count (+ (var-get approved-token-count) u1))
+            )
+            true
+          )
+          (map-set proposed-to-whitelist {token: (get tribute-token proposal)} {proposed: false})
           (return-deposit (unwrap-panic (get sponsor proposal)))
           (ok true)
         )
@@ -834,10 +864,6 @@
       )
     )
   )
-)
-
-(define-public (process-whitelist-proposal)
-  (ok true)
 )
 
 (define-public (process-guild-kick-proposal)
