@@ -427,7 +427,7 @@
     (let ((proposal-id (id-queued-proposal proposal-index)))
       (let ((proposal (unwrap-panic (get-proposal-by-index? proposal-index))))
         (begin
-          (require-true (and (get-flag u4 (get flags proposal))))
+          (require-true (get-flag u4 (get flags proposal)))
           (update-proposal-for-processing proposal-id proposal)
           (if (and (did-pass proposal)
                 (< (var-get approved-token-count) max-token-whitelist-count))
@@ -441,6 +441,35 @@
             true
           )
           (map-set proposed-to-whitelist {token: (get tribute-token proposal)} {proposed: false})
+          (return-deposit (unwrap-panic (get sponsor proposal)))
+          (ok true)
+        )
+      )
+    )
+  )
+)
+
+(define-public (process-guild-kick-proposal (proposal-index uint))
+ (begin
+    (validate-proposal-for-processing proposal-index)
+    (let ((proposal-id (id-queued-proposal proposal-index)))
+      (let ((proposal (unwrap-panic (get-proposal-by-index? proposal-index))))
+        (begin
+          (require-true (get-flag u5 (get flags proposal)))
+          (update-proposal-for-processing proposal-id proposal)
+          (if (did-pass proposal)
+            (begin
+              (update-proposal-for-passed-vote proposal-id proposal)
+              (let ((member (unwrap-panic (get applicant proposal))))
+                (match (map-get? members {member: member})
+                  member-data (update-member-for-jail member member-data)
+                  true
+                )
+              )
+            )
+            true
+          )
+          (map-set proposed-to-kick {member: (unwrap-panic (get applicant proposal))} {proposed: false})
           (return-deposit (unwrap-panic (get sponsor proposal)))
           (ok true)
         )
@@ -517,6 +546,15 @@
     (>= (* (+ (var-get total-shares) (var-get total-loot)) dilution-bound)
       (get max-total-shares-and-loot-at-yes-votes proposal))
     (is-eq u0 (unwrap-panic (get jailed (map-get? members {member: (unwrap-panic (get applicant proposal))})))))
+)
+
+
+;; can only ragequit if the latest proposal you voted YES on has been processed
+(define-private (can-ragequit (highest-index-yes-vote uint))
+  (begin
+    (require-true (< highest-index-yes-vote (var-get proposal-queue-length)))
+    (get-flag u1 (get flags (unwrap-panic (get-proposal-by-index? highest-index-yes-vote))))
+  )
 )
 
 (define-private (require-false (index uint) (flags (list 6 bool)))
@@ -725,6 +763,23 @@
   )
 )
 
+(define-private (update-member-for-jail (member principal) (member-data (tuple (delegate-key principal) (shares uint) (loot uint) (highest-index-yes-vote uint) (jailed uint))))
+(let ((shares (get shares member-data)))
+  (begin
+    (map-set members {member: member}
+      {
+        delegate-key: (get delegate-key member-data),
+        shares: u0,
+        loot: (+ shares (get loot member-data)),
+        highest-index-yes-vote: (get highest-index-yes-vote member-data),
+        jailed: (get jailed member-data)}
+      )
+    )
+    (var-set total-shares (- (var-get total-shares) shares))
+    (var-set total-loot (+ (var-get total-loot) shares))
+  )
+)
+
 
 (define-private (update-proposal-for-processing (proposal-id uint)
   (proposal (tuple
@@ -864,10 +919,6 @@
       )
     )
   )
-)
-
-(define-public (process-guild-kick-proposal)
-  (ok true)
 )
 
 (define-public (rage-quit)
