@@ -315,8 +315,8 @@
     (unsafe-add-to-balance escrow deposit-token proposal-deposit)
     (let ((proposal (unwrap-panic (map-get? proposals {id: proposal-id}))))
       (begin
-        (require-false u0 (get flags proposal))
-        (require-false u3 (get flags proposal))
+        (require-false-flag u0 (get flags proposal))
+        (require-false-flag u3 (get flags proposal))
         (require-not-jailed (get applicant proposal))
         (require-not-too-many-guild-tokens (get tribute-offered proposal) (get tribute-token proposal))
 
@@ -478,6 +478,47 @@
   )
 )
 
+(define-public (cancel-proposal (proposal-id uint))
+  (match (map-get? proposals {id: proposal-id})
+    proposal (begin
+      (require-false-flag u0 (get flags proposal)) ;; not yet sponsored
+      (require-false-flag u3 (get flags proposal)) ;; not yet cancelled
+      (require-true (is-eq tx-sender (get proposer proposal)))
+
+      (update-proposal-for-cancelling proposal-id proposal)
+      (unsafe-internal-transfer escrow (get proposer proposal) (get tribute-token proposal) (get tribute-offered proposal))
+      (print (tuple (msg "proposal cancelled") (proposal-id proposal-id)))
+      (ok true)
+    )
+    (ok false)
+  )
+)
+
+(define-public (update-delegate-key (new-delegate-key principal))
+  (begin
+    (require-shareholder tx-sender)
+    (if (not (is-eq tx-sender new-delegate-key))
+      (require-not-member new-delegate-key)
+      true
+    )
+    (match (map-get? members {member: tx-sender})
+      member-data (begin
+        (map-delete member-by-delegate-key {delegate-key: (get delegate-key member-data)})
+        (map-set member-by-delegate-key {delegate-key: new-delegate-key} {member: tx-sender})
+        (map-set members {member: tx-sender}
+          {
+            delegate-key: new-delegate-key,
+            shares: (get shares member-data),
+            loot: (get loot member-data),
+            highest-index-yes-vote: (get highest-index-yes-vote member-data),
+            jailed: (get jailed member-data)})
+      )
+      true
+    )
+    (ok true)
+  )
+)
+
 ;;
 ;; Private functions
 ;; not changing the state
@@ -557,7 +598,7 @@
   )
 )
 
-(define-private (require-false (index uint) (flags (list 6 bool)))
+(define-private (require-false-flag (index uint) (flags (list 6 bool)))
   (unwrap-panic (match (get-flag? index flags)
                       flag (if flag none (some true))
                       (some true)
@@ -591,6 +632,24 @@
   (unwrap-panic (if (is-eq (get jailed member) u0) (some true) none))
 )
 
+(define-private (require-shareholder)
+  (unwrap-panic
+    (match (map-get? members {member: tx-sender})
+        member-data (if (> (get shares member-data) u0) (some true) none)
+        none
+    )
+  )
+)
+
+(define-private (require-not-member (principal principal))
+  (begin
+    (unwrap-panic (if (is-none (map-get? members {member: principal})) (some true) none))
+    (match (get member (map-get? member-by-delegate-key {delegate-key: principal}))
+      delegate (unwrap-panic (if (is-none (map-get? members {member: delegate})) (some true) none))
+      true
+    )
+  )
+)
 
 (define-private (get-current-period)
   (/ (- (get-time) summoning-time) period-duration)
@@ -728,7 +787,47 @@
   )
 )
 
-(define-private (update-member (member principal) (member-data (tuple (delegate-key principal) (shares uint) (loot uint) (highest-index-yes-vote uint) (jailed uint))) (index uint))
+(define-private (update-proposal-for-cancelling (proposal-id uint)
+(proposal (tuple
+    (applicant (optional principal))
+    (proposer principal)
+    (sponsor (optional principal))
+    (shares-requested uint)
+    (loot-requested uint)
+    (tribute-offered uint)
+    (tribute-token principal)
+    (payment-requested uint)
+    (payment-token principal)
+    (starting-period uint)
+    (yes-votes uint)
+    (no-votes uint)
+    (flags (list 6 bool))
+    (details (buff 256))
+    (max-total-shares-and-loot-at-yes-votes uint)
+  )))
+
+  (map-set proposals {id: proposal-id}
+        (
+          (applicant (get applicant proposal))
+          (proposer (get proposer proposal))
+          (sponsor (get sponsor proposal))
+          (shares-requested (get shares-requested proposal))
+          (loot-requested (get loot-requested proposal))
+          (tribute-offered (get tribute-offered proposal))
+          (tribute-token (get tribute-token proposal))
+          (payment-requested (get payment-requested proposal))
+          (payment-token (get payment-token proposal))
+          (starting-period (get starting-period proposal))
+          (yes-votes (get yes-votes proposal))
+          (no-votes (get no-votes proposal))
+          (flags (set-flag u3 (get flags proposal)))
+          (details (get details proposal))
+          (max-total-shares-and-loot-at-yes-votes (get max-total-shares-and-loot-at-yes-votes proposal))
+        )
+      )
+)
+
+(define-private (update-member-after-yes (member principal) (member-data (tuple (delegate-key principal) (shares uint) (loot uint) (highest-index-yes-vote uint) (jailed uint))) (index uint))
   (map-set members {member: member}
     {
       delegate-key: (get delegate-key member-data),
@@ -906,7 +1005,7 @@
             (begin
               (if yes-no-vote (let ((index (get highest-index-yes-vote member-data)))
                                     (if (> proposal-index index)
-                                      (update-member member member-data index)
+                                      (update-member-after-yes member member-data index)
                                       true
                                     ))
 
