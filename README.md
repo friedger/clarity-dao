@@ -33,6 +33,8 @@ The contract supports any token that implements a basic fungible token trait.
 
 #### Testing
 
+The contract can be deployed to the mocknet or testnet. In `test/integration.ts` the relevant functions are defined such that you can run `yarn mocha test/integration.ts` to deploy and execute the contract.
+
 #### Remarks
 
 - The contract maintains an internal balance of tokens for all members in addition to the balance of total tokens, an escrow and the dao bank. These are prepresented by contract principals as contracts can never be a transaction sender. In solidity special, well-known addresses were used.
@@ -42,5 +44,12 @@ The contract supports any token that implements a basic fungible token trait.
 - The current tooling makes development and testing difficult.
   - Currently, the Clarity RPL does not support `contract-of` and `string-utf8`. Therefore, typos, syntax errors and type errors could not be detected in Visual Studio code, but only after deploying on mocknet.
   - Currently, the Clartiy SDK does not support `contract-of`. Therefore, no unit tests were written.
+- The contract is structured through comments in between different sections:
+  - Data storage
+  - Public functions
+  - Functions that do not change the state with subsections for different areas
+  - Functions that change the state also with subsections for different areas  
+Currently, there is no other support for long contracts. It might be possible to split the contract into several contracts (needs more investigation).
+- There are few long functions that update one or more values of a map. [Type aliases](https://github.com/clarity-lang/reference/issues/6) and [merge function](https://github.com/blockstack/stacks-blockchain/pull/2117) would have been helpful here.
 
 The contract has **NOT** been tested thoroughly. Use with care!
