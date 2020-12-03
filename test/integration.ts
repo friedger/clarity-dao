@@ -15,7 +15,7 @@ import { StacksTestnet } from "@stacks/network";
 import * as fs from "fs";
 
 export const local = true;
-export const mocknet = true;
+export const mocknet = false;
 export const noSidecar = true;
 
 const STACKS_CORE_API_URL = local

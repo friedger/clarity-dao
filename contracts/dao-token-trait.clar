@@ -1,3 +1,6 @@
 (define-trait token-trait
-    ((transfer-from? (principal principal uint) (response uint uint)))
+  (
+    (transfer-to? (uint principal) (response bool uint))
+    (balance-of (principal) (response uint uint))
+  )
 )

@@ -281,7 +281,7 @@
     )
     (require-not-too-many-guild-tokens tribute-offered (contract-of tribute-token))
 
-    (unwrap-panic (contract-call? tribute-token transfer-from? tx-sender (as-contract tx-sender) tribute-offered))
+    (unwrap-panic (contract-call? tribute-token transfer-to? tribute-offered (as-contract tx-sender)))
     (unsafe-add-to-balance escrow (contract-of tribute-token) tribute-offered)
     (ok (add-proposal (some applicant) shares-requested loot-requested tribute-offered tribute-token payment-requested payment-token details (list)))
   )
@@ -311,7 +311,7 @@
 
 (define-public (sponsor-proposal (proposal-id uint))
   (begin
-    (unwrap-panic (contract-call? .dao-token transfer-from? tx-sender escrow proposal-deposit))
+    (unwrap-panic (contract-call? .dao-token transfer-to? proposal-deposit escrow))
     (unsafe-add-to-balance escrow deposit-token proposal-deposit)
     (let ((proposal (unwrap-panic (map-get? proposals {id: proposal-id}))))
       (begin
@@ -354,6 +354,42 @@
   )
 )
 
+
+;;
+;; members can submit a vote to proposal
+;; If vote is none it counts as abstention, i.e. are only registered on chain and don't have an impact on the result
+;;
+(define-public (submit-vote (proposal-index uint) (vote (optional bool)))
+  (let (
+      (proposal (unwrap-panic (get-proposal-by-index? proposal-index)))
+      (member (unwrap-panic (get member (map-get? member-by-delegate-key {delegate-key: tx-sender}))))
+    )
+    (let (
+        (starting-period (get starting-period proposal))
+      )
+      (begin
+        (require-no-vote (map-get? votes-by-member {proposal-index: proposal-index, member: member}))
+        (require-in-voting-period starting-period)
+        (require-true (map-insert votes-by-member {proposal-index: proposal-index, member: member} {vote: vote}))
+        (match vote
+          yes-no-vote (let ((member-data (unwrap-panic (map-get? members {member: member}))))
+            (begin
+              (if yes-no-vote (let ((index (get highest-index-yes-vote member-data)))
+                                    (if (> proposal-index index)
+                                      (update-member-after-yes member member-data index)
+                                      true
+                                    ))
+
+                              true)
+              (update-proposal-for-vote member-data proposal proposal-index yes-no-vote)
+            ))
+          true ;; abstention
+        )
+        (ok true)
+      )
+    )
+  )
+)
 
 (define-public (process-proposal (proposal-index uint))
   (begin
@@ -478,6 +514,60 @@
   )
 )
 
+(define-public (ragequit (tokens (list 400 <token-trait>)) (shares-to-burn uint) (loot-to-burn uint))
+  (begin
+    (require-member)
+    (ragequit-member tx-sender tokens shares-to-burn loot-to-burn)
+  )
+)
+
+
+(define-public (ragekick (member-to-kick principal) (tokens (list 400 <token-trait>)))
+  (let ((member-data (unwrap-panic (map-get? members {member: member-to-kick}))))
+    (begin
+      (require-true (not (is-eq (get jailed member-data) u0)))
+      (require-true (> (get loot member-data) u0))
+      (require-true (can-ragequit (get highest-index-yes-vote member-data)))
+      (ragequit-member member-to-kick tokens u0 (get loot member-data)))))
+
+
+(define-private (ragequit-member (member principal) (tokens (list 400 <token-trait>)) (shares-to-burn uint) (loot-to-burn uint))
+  (let
+    (
+      (initial-total-shares-and-loot (+ (var-get total-shares) (var-get total-loot)))
+      (member-data (unwrap-panic (map-get? members {member: member})))
+    )
+    (begin
+      (require-true (>= (get shares member-data) shares-to-burn))
+      (require-true (>= (get loot member-data) loot-to-burn))
+      (require-true (can-ragequit (get highest-index-yes-vote member-data)))
+      (let
+        (
+          (shares-and-loot-to-burn (+ (get shares member-data) (get loot member-data))))
+        (update-member-shares-and-loot member member-data
+          (- (get shares member-data) shares-to-burn)
+          (- (get loot member-data) loot-to-burn))
+        (var-set total-shares (- (var-get total-shares) shares-to-burn))
+        (var-set total-loot (- (var-get total-loot) loot-to-burn))
+        (fold move-fair-share tokens {shares-and-loot-to-burn: shares-and-loot-to-burn, initial-total-shares-and-loot: initial-total-shares-and-loot, member: member})
+        (ok true)
+      )
+    )
+  )
+)
+
+(define-public (collect-tokens (token <token-trait>))
+  (begin
+    (require-delegate)
+    (let ((amount-to-collect (unwrap-panic (contract-call? token balance-of (as-contract tx-sender)))))
+      (require-true (> amount-to-collect u0))
+      (require-true (is-some (map-get? token-whitelist {token: (contract-of token)})))
+      (require-true (> (unwrap-panic (get amount (map-get? user-token-balance {user: guild, token: (contract-of token)}))) u0))
+    )
+    (ok true)
+  )
+)
+
 (define-public (cancel-proposal (proposal-id uint))
   (match (map-get? proposals {id: proposal-id})
     proposal (begin
@@ -498,7 +588,7 @@
   (begin
     (require-shareholder tx-sender)
     (if (not (is-eq tx-sender new-delegate-key))
-      (require-not-member new-delegate-key)
+      (require-delegate-key-is-new new-delegate-key)
       true
     )
     (match (map-get? members {member: tx-sender})
@@ -522,6 +612,10 @@
 ;;
 ;; Private functions
 ;; not changing the state
+;;
+
+;;
+;; Helper functions for list of flags
 ;;
 (define-private (get-by-index (flag bool) (state (tuple (current-index uint) (requested-index uint) (result (optional bool)))))
   (tuple
@@ -563,6 +657,17 @@
   (get result (fold set-by-index list-of-flags {current-index: u0, requested-index: index, result: (list)}))
 )
 
+(define-private (require-false-flag (index uint) (flags (list 6 bool)))
+  (unwrap-panic (match (get-flag? index flags)
+                      flag (if flag none (some true))
+                      (some true)
+                    )
+  )
+)
+
+;;
+;; Helper functions for voting
+;;
 (define-private (did-pass
   (proposal (tuple
     (applicant (optional principal))
@@ -598,14 +703,9 @@
   )
 )
 
-(define-private (require-false-flag (index uint) (flags (list 6 bool)))
-  (unwrap-panic (match (get-flag? index flags)
-                      flag (if flag none (some true))
-                      (some true)
-                    )
-  )
-)
-
+;;
+;; require functions
+;;
 (define-private (require-not-proposed-to-kick (member principal))
     (match (get proposed (map-get? proposed-to-kick {member: member}))
     proposed (unwrap-panic (if proposed (some true) none))
@@ -632,6 +732,18 @@
   (unwrap-panic (if (is-eq (get jailed member) u0) (some true) none))
 )
 
+(define-private (require-delegate)
+  (unwrap-panic
+    (match (get member (map-get? member-by-delegate-key {delegate-key: tx-sender}))
+      delegate (match (map-get? members {member: delegate})
+        member-data (if (> (get shares member-data) u0) (some true) none)
+        none
+      )
+      none
+    )
+  )
+)
+
 (define-private (require-shareholder)
   (unwrap-panic
     (match (map-get? members {member: tx-sender})
@@ -641,16 +753,30 @@
   )
 )
 
-(define-private (require-not-member (principal principal))
+(define-private (require-member)
+  (unwrap-panic
+    (match (map-get? members {member: tx-sender})
+        member-data (if (or (> (get shares member-data) u0) (> (get loot member-data) u0))
+          (some true)
+          none)
+        none
+    )
+  )
+)
+
+(define-private (require-delegate-key-is-new (delegate-key principal))
   (begin
-    (unwrap-panic (if (is-none (map-get? members {member: principal})) (some true) none))
-    (match (get member (map-get? member-by-delegate-key {delegate-key: principal}))
-      delegate (unwrap-panic (if (is-none (map-get? members {member: delegate})) (some true) none))
+    (unwrap-panic (if (is-none (map-get? members {member: delegate-key})) (some true) none))
+    (match (get member (map-get? member-by-delegate-key {delegate-key: delegate-key}))
+      delegatee (unwrap-panic (if (is-none (map-get? members {member: delegatee})) (some true) none))
       true
     )
   )
 )
 
+;;
+;; time related functions
+;;
 (define-private (get-current-period)
   (/ (- (get-time) summoning-time) period-duration)
 )
@@ -668,6 +794,9 @@
   )
 )
 
+;;
+;; proposal related functions
+;;
 (define-read-only (get-proposal-by-index? (proposal-index uint))
   (map-get? proposals {id: (id-queued-proposal proposal-index)})
 )
@@ -685,6 +814,10 @@
 
 ;;
 ;; private functions changing the state
+;;
+
+;;
+;; proposal related functions
 ;;
 (define-private (update-proposal-for-sponsoring (proposal-id uint)
 (proposal (tuple
@@ -827,58 +960,6 @@
       )
 )
 
-(define-private (update-member-after-yes (member principal) (member-data (tuple (delegate-key principal) (shares uint) (loot uint) (highest-index-yes-vote uint) (jailed uint))) (index uint))
-  (map-set members {member: member}
-    {
-      delegate-key: (get delegate-key member-data),
-      shares: (get shares member-data),
-      loot: (get loot member-data),
-      highest-index-yes-vote: index,
-      jailed: (get jailed member-data)}
-  )
-)
-
-(define-private (update-member-shares-and-loot (member principal) (member-data (tuple (delegate-key principal) (shares uint) (loot uint) (highest-index-yes-vote uint) (jailed uint))) (shares uint) (loot uint))
-  (map-set members {member: member}
-    {
-      delegate-key: (get delegate-key member-data),
-      shares: (+ shares (get shares member-data)),
-      loot: (+ loot (get loot member-data)),
-      highest-index-yes-vote: (get highest-index-yes-vote member-data),
-      jailed: (get jailed member-data)}
-  )
-)
-
-(define-private (update-member-delegate-key (member principal))
-  (match (map-get? members {member: member})
-    member-data (map-set members {member: member}
-      {
-        delegate-key: member,
-        shares: (get shares member-data),
-        loot: (get loot member-data),
-        highest-index-yes-vote: (get highest-index-yes-vote member-data),
-        jailed: (get jailed member-data)})
-    true
-  )
-)
-
-(define-private (update-member-for-jail (member principal) (member-data (tuple (delegate-key principal) (shares uint) (loot uint) (highest-index-yes-vote uint) (jailed uint))))
-(let ((shares (get shares member-data)))
-  (begin
-    (map-set members {member: member}
-      {
-        delegate-key: (get delegate-key member-data),
-        shares: u0,
-        loot: (+ shares (get loot member-data)),
-        highest-index-yes-vote: (get highest-index-yes-vote member-data),
-        jailed: (get jailed member-data)}
-      )
-    )
-    (var-set total-shares (- (var-get total-shares) shares))
-    (var-set total-loot (+ (var-get total-loot) shares))
-  )
-)
-
 
 (define-private (update-proposal-for-processing (proposal-id uint)
   (proposal (tuple
@@ -960,6 +1041,63 @@
       )
 )
 
+;;
+;; member related functions
+;;
+(define-private (update-member-after-yes (member principal) (member-data (tuple (delegate-key principal) (shares uint) (loot uint) (highest-index-yes-vote uint) (jailed uint))) (index uint))
+  (map-set members {member: member}
+    {
+      delegate-key: (get delegate-key member-data),
+      shares: (get shares member-data),
+      loot: (get loot member-data),
+      highest-index-yes-vote: index,
+      jailed: (get jailed member-data)}
+  )
+)
+
+(define-private (update-member-shares-and-loot (member principal) (member-data (tuple (delegate-key principal) (shares uint) (loot uint) (highest-index-yes-vote uint) (jailed uint))) (shares uint) (loot uint))
+  (map-set members {member: member}
+    {
+      delegate-key: (get delegate-key member-data),
+      shares: (+ shares (get shares member-data)),
+      loot: (+ loot (get loot member-data)),
+      highest-index-yes-vote: (get highest-index-yes-vote member-data),
+      jailed: (get jailed member-data)}
+  )
+)
+
+(define-private (update-member-delegate-key (member principal))
+  (match (map-get? members {member: member})
+    member-data (map-set members {member: member}
+      {
+        delegate-key: member,
+        shares: (get shares member-data),
+        loot: (get loot member-data),
+        highest-index-yes-vote: (get highest-index-yes-vote member-data),
+        jailed: (get jailed member-data)})
+    true
+  )
+)
+
+(define-private (update-member-for-jail (member principal) (member-data (tuple (delegate-key principal) (shares uint) (loot uint) (highest-index-yes-vote uint) (jailed uint))))
+(let ((shares (get shares member-data)))
+  (begin
+    (map-set members {member: member}
+      {
+        delegate-key: (get delegate-key member-data),
+        shares: u0,
+        loot: (+ shares (get loot member-data)),
+        highest-index-yes-vote: (get highest-index-yes-vote member-data),
+        jailed: (get jailed member-data)}
+      )
+    )
+    (var-set total-shares (- (var-get total-shares) shares))
+    (var-set total-loot (+ (var-get total-loot) shares))
+  )
+)
+
+
+
 (define-private (update-total-guild-bank-tokens-for-tribute (tribute-token principal) (amount uint))
   (match (get amount (map-get? user-token-balance {user: guild, token: tribute-token}))
     balance (if (and
@@ -972,6 +1110,9 @@
   )
 )
 
+;;
+;; balance related functions
+;;
 (define-private (update-total-guild-bank-tokens-for-payment  (payment-token principal) (amount uint))
   (match (get amount (map-get? user-token-balance {user: guild, token: payment-token}))
       balance (if (and
@@ -984,46 +1125,35 @@
     )
 )
 
-;;
-;; members can submit a vote to proposal
-;; If vote is none it counts as abstention, i.e. are only registered on chain and don't have an impact on the result
-;;
-(define-public (submit-vote (proposal-index uint) (vote (optional bool)))
-  (let (
-      (proposal (unwrap-panic (get-proposal-by-index? proposal-index)))
-      (member (unwrap-panic (get member (map-get? member-by-delegate-key {delegate-key: tx-sender}))))
-    )
-    (let (
-        (starting-period (get starting-period proposal))
-      )
-      (begin
-        (require-no-vote (map-get? votes-by-member {proposal-index: proposal-index, member: member}))
-        (require-in-voting-period starting-period)
-        (require-true (map-insert votes-by-member {proposal-index: proposal-index, member: member} {vote: vote}))
-        (match vote
-          yes-no-vote (let ((member-data (unwrap-panic (map-get? members {member: member}))))
-            (begin
-              (if yes-no-vote (let ((index (get highest-index-yes-vote member-data)))
-                                    (if (> proposal-index index)
-                                      (update-member-after-yes member member-data index)
-                                      true
-                                    ))
 
-                              true)
-              (update-proposal-for-vote member-data proposal proposal-index yes-no-vote)
-            ))
-          true ;; abstention
-        )
-        (ok true)
-      )
-    )
+(define-private (move-fair-share (token <token-trait>) (parameters (tuple (shares-and-loot-to-burn uint) (initial-total-shares-and-loot uint) (member principal))))
+  (let
+    ((shares-and-loot-to-burn (get shares-and-loot-to-burn parameters))
+      (initial-total-shares-and-loot (get initial-total-shares-and-loot parameters))
+      (member (get member parameters)))
+    (let
+      ((amount-to-ragequit (fair-share (unwrap-panic (get amount (map-get? user-token-balance {user: guild, token: (contract-of token)})))
+        shares-and-loot-to-burn
+        initial-total-shares-and-loot)))
+      (begin
+        (if (> amount-to-ragequit u0)
+          (begin
+            (map-set user-token-balance {user: guild, token: (contract-of token)}
+              {amount: (- (unwrap-panic (get amount (map-get? user-token-balance {user: guild, token: (contract-of token)}))) amount-to-ragequit)}
+            )
+            (map-set user-token-balance {user: member, token: (contract-of token)}
+              {amount: (+ (unwrap-panic (get amount (map-get? user-token-balance {user: guild, token: (contract-of token)}))) amount-to-ragequit)}))
+          true)
+        {shares-and-loot-to-burn: shares-and-loot-to-burn, initial-total-shares-and-loot: initial-total-shares-and-loot, member: member}))
   )
 )
 
-(define-public (rage-quit)
-  (ok true)
-)
-
-(define-public (rage-kick)
-  (ok true)
-)
+(define-private (fair-share (balance uint) (shares uint) (initial-total-shares uint))
+  (begin
+    (require-true (> initial-total-shares u0))
+    (if (is-eq balance u0)
+      u0
+      (let ((prod (* balance shares)))
+        (if (is-eq (/ prod balance) shares)
+          (/ prod initial-total-shares)
+          (* (/ balance initial-total-shares) shares))))))

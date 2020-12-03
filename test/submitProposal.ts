@@ -8,6 +8,7 @@ import { assert } from "chai";
 
 describe("dao contract test suite", () => {
   let daoClient: Client;
+  let daoTokenClient: Client;
   let provider: Provider;
 
   before(async () => {
@@ -17,6 +18,14 @@ describe("dao contract test suite", () => {
       "dao",
       provider
     );
+    await daoClient.deployContract();
+    daoTokenClient = new Client(
+      "SP3GWX3NE58KXHESRYE4DYQ1S31PQJTCRXB3PE9SB.dao-token",
+      "dao-token",
+      provider
+    );
+    await daoTokenClient.checkContract();
+    await daoTokenClient.deployContract();
     await daoClient.deployContract();
   });
 
