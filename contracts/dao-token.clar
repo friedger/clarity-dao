@@ -2,8 +2,8 @@
 
 (define-fungible-token dao-token)
 
-(define-public (transfer-to? (amount uint) (recipient principal))
-  (ft-transfer? dao-token amount tx-sender recipient)
+(define-public (transfer? (amount uint) (sender principal) (recipient principal))
+  (ft-transfer? dao-token amount sender recipient)
 )
 
 (define-read-only (balance-of (principal principal))

@@ -5,6 +5,7 @@
    (unwrap-panic (get-block-info? time (- block-height u1)))
 )
 
+;; Set properties as you need
 (define-constant period-duration  u17280)
 (define-constant voting-period-length  u35)
 (define-constant grace-period-length  u35)
@@ -13,6 +14,7 @@
 (define-constant processing-reward  u10000)
 (define-constant summoning-time  (get-time))
 
+;; Main token for this DAO
 (define-constant deposit-token .dao-token)
 
 (define-constant max-voting-period-length u1000000000000000000)
@@ -23,8 +25,8 @@
 (define-constant max-token-guild-bank-count u200)
 
 (define-constant guild (as-contract tx-sender))
-(define-constant total (as-contract tx-sender)) ;; TODO some unused address
-(define-constant escrow (as-contract tx-sender)) ;; TODO some unused address
+(define-constant total .dao-token-trait) ;; only used as map key
+(define-constant escrow .dao-token) ;; only used as map key
 
 (define-constant whitelist-flags (list false false false false true false))
 (define-constant guild-kick-flags (list false false false false false true))
@@ -64,6 +66,9 @@
   )
 )
 
+;;
+;; add more founding members here
+;;
 (begin
   (map-insert members ((member tx-sender))
     (
@@ -82,6 +87,9 @@
   )
 )
 
+;;
+;; add more founding members here
+;;
 (begin
  (map-insert member-by-delegate-key ((delegate-key tx-sender))
     ((member tx-sender))
@@ -117,144 +125,6 @@
 (define-map proposal-queue ((index uint)) ((id uint)))
 (define-data-var proposal-queue-length uint u0)
 
-(define-private (unsafe-add-to-balance (user principal) (token principal) (amount uint))
-  (begin
-    (map-set user-token-balance {user: user, token: token}
-      {amount: (+
-            (default-to u0 (get amount (map-get? user-token-balance {user: user, token: token})))
-            amount)}
-    )
-
-    (map-set user-token-balance {user: total, token: token}
-      {amount: (+
-            (default-to u0 (get amount (map-get? user-token-balance {user: total, token: token})))
-            amount)}
-    )
-  )
-)
-
-(define-private (unsafe-substract-from-balance (user principal) (token principal) (amount uint))
-  (begin
-    (map-set user-token-balance {user: user, token: token}
-      {amount: (-
-            (default-to u0 (get amount (map-get? user-token-balance {user: user, token: token})))
-            amount)}
-    )
-
-    (map-set user-token-balance {user: total, token: token}
-      {amount: (-
-            (default-to u0 (get amount (map-get? user-token-balance {user: total, token: token})))
-            amount)}
-    )
-  )
-)
-
-(define-private (unsafe-internal-transfer (sender principal) (receiver principal) (token principal) (amount uint))
-  (begin
-    (unsafe-substract-from-balance sender token amount)
-    (unsafe-add-to-balance receiver token amount)
-  )
-)
-
-(define-private (return-deposit (sponsor principal))
-  (begin
-    (unsafe-internal-transfer escrow tx-sender deposit-token processing-reward)
-    (unsafe-internal-transfer escrow sponsor deposit-token (- proposal-deposit processing-reward))
-  )
-)
-
-(define-private (inc-proposal-count)
-  (var-set proposal-count (+ u1 (var-get proposal-count)))
-)
-
-(define-private (inc-proposal-queue-length)
-  (let ((new-length (+ u1 (var-get proposal-queue-length))))
-    (begin
-      (var-set proposal-queue-length new-length)
-      new-length
-    )
-  )
-)
-
-(define-private (add-proposal (user (optional principal)) (shares-requested uint) (loot-requested uint)
-  (tribute-offered uint)
-  (tribute-token <token-trait>)
-  (payment-requested uint)
-  (payment-token <token-trait>)
-  (details (buff 256))
-  (flags (list 6 bool))
-  )
-  (let ((id (+ u1 (var-get proposal-count))))
-    (begin
-      (map-insert proposals {id: id}
-        (
-          (applicant user)
-          (proposer tx-sender)
-          (sponsor none)
-          (shares-requested shares-requested)
-          (loot-requested loot-requested)
-          (tribute-offered tribute-offered)
-          (tribute-token (contract-of tribute-token))
-          (payment-requested payment-requested)
-          (payment-token (contract-of payment-token))
-          (starting-period u0)
-          (yes-votes u0)
-          (no-votes u0)
-          (flags flags)
-          (details details)
-          (max-total-shares-and-loot-at-yes-votes u0)
-        )
-      )
-      (var-set proposal-count id)
-      id
-    )
-  )
-)
-
-(define-private (require-true (value bool))
-  (unwrap-panic (if value (some true) none))
-)
-
-(define-private (require-no-vote (value (optional (tuple (vote (optional bool))))))
-  (unwrap-panic
-    (match value
-      some-value none
-      (some true)
-    )
-  )
-)
-
-(define-private (require-in-voting-period (starting-period uint))
-  (let ((current-period (get-current-period)))
-    (require-true (and (>= current-period starting-period) (< current-period (+ starting-period voting-period-length))))
-  )
-)
-
-(define-private (require-not-too-many-guild-tokens (amount uint) (token principal))
-  (if (and
-        (> amount u0)
-        (is-eq u0 (default-to u0 (get amount (map-get? user-token-balance ((user guild) (token token))))))
-      )
-      (unwrap-panic (if (< (var-get total-guild-bank-token-count) max-token-guild-bank-count) (some true) none))
-      true
-  )
-)
-
-(define-private (require-not-too-many-whitelisted-tokens)
-  (unwrap-panic (if (< (var-get approved-token-count) max-token-whitelist-count) (some true) none))
-)
-
-(define-private (require-member-shares-or-loot
-  (member (tuple
-    (delegate-key principal)
-    (shares uint)
-    (loot uint)
-    (highest-index-yes-vote uint)
-    (jailed uint)
-  )))
-  (unwrap-panic (if (or (> (get shares member) u0) (> (get loot member) u0)) (some true) none))
-)
-
 
 (define-read-only (id-queued-proposal (proposal-index uint))
   (unwrap-panic (get id (map-get? proposal-queue {index: proposal-index})))
@@ -281,7 +151,7 @@
     )
     (require-not-too-many-guild-tokens tribute-offered (contract-of tribute-token))
 
-    (unwrap-panic (contract-call? tribute-token transfer-to? tribute-offered (as-contract tx-sender)))
+    (unwrap-panic (contract-call? tribute-token transfer? tribute-offered tx-sender (as-contract tx-sender)))
     (unsafe-add-to-balance escrow (contract-of tribute-token) tribute-offered)
     (ok (add-proposal (some applicant) shares-requested loot-requested tribute-offered tribute-token payment-requested payment-token details (list)))
   )
@@ -311,7 +181,7 @@
 
 (define-public (sponsor-proposal (proposal-id uint))
   (begin
-    (unwrap-panic (contract-call? .dao-token transfer-to? proposal-deposit escrow))
+    (unwrap-panic (contract-call? .dao-token transfer? proposal-deposit tx-sender escrow))
     (unsafe-add-to-balance escrow deposit-token proposal-deposit)
     (let ((proposal (unwrap-panic (map-get? proposals {id: proposal-id}))))
       (begin
@@ -556,13 +426,33 @@
   )
 )
 
+(define-public (withdraw-balance (token <token-trait>) (amount uint))
+  (begin
+    (require-true (>= (unwrap-panic (get amount (map-get? user-token-balance {user: tx-sender, token: (contract-of token)}))) amount))
+    (unsafe-substract-from-balance tx-sender (contract-of token) amount)
+    (contract-call? token transfer? amount (as-contract tx-sender) tx-sender)
+  )
+)
+
 (define-public (collect-tokens (token <token-trait>))
   (begin
     (require-delegate)
     (let ((amount-to-collect (unwrap-panic (contract-call? token balance-of (as-contract tx-sender)))))
-      (require-true (> amount-to-collect u0))
-      (require-true (is-some (map-get? token-whitelist {token: (contract-of token)})))
-      (require-true (> (unwrap-panic (get amount (map-get? user-token-balance {user: guild, token: (contract-of token)}))) u0))
+        (begin
+          (require-true (> amount-to-collect u0))
+          (require-true (is-some (map-get? token-whitelist {token: (contract-of token)})))
+          (require-true
+            (or
+              (> (get-user-token-balance {user: guild, token: (contract-of token)}) u0)
+              (< (var-get total-guild-bank-token-count) max-token-guild-bank-count)
+            )
+          )
+          (if (is-eq (get-user-token-balance {user: guild, token: (contract-of token)}) u0)
+            (inc-total-guild-bank-token-count)
+            true
+          )
+          (unsafe-add-to-balance guild (contract-of token) amount-to-collect)
+      )
     )
     (ok true)
   )
@@ -706,6 +596,51 @@
 ;;
 ;; require functions
 ;;
+
+(define-private (require-true (value bool))
+  (unwrap-panic (if value (some true) none))
+)
+
+(define-private (require-no-vote (value (optional (tuple (vote (optional bool))))))
+  (unwrap-panic
+    (match value
+      some-value none
+      (some true)
+    )
+  )
+)
+
+(define-private (require-in-voting-period (starting-period uint))
+  (let ((current-period (get-current-period)))
+    (require-true (and (>= current-period starting-period) (< current-period (+ starting-period voting-period-length))))
+  )
+)
+
+(define-private (require-not-too-many-guild-tokens (amount uint) (token principal))
+  (if (and
+        (> amount u0)
+        (is-eq u0 (default-to u0 (get amount (map-get? user-token-balance ((user guild) (token token))))))
+      )
+      (unwrap-panic (if (< (var-get total-guild-bank-token-count) max-token-guild-bank-count) (some true) none))
+      true
+  )
+)
+
+(define-private (require-not-too-many-whitelisted-tokens)
+  (unwrap-panic (if (< (var-get approved-token-count) max-token-whitelist-count) (some true) none))
+)
+
+(define-private (require-member-shares-or-loot
+  (member (tuple
+    (delegate-key principal)
+    (shares uint)
+    (loot uint)
+    (highest-index-yes-vote uint)
+    (jailed uint)
+  )))
+  (unwrap-panic (if (or (> (get shares member) u0) (> (get loot member) u0)) (some true) none))
+)
+
 (define-private (require-not-proposed-to-kick (member principal))
     (match (get proposed (map-get? proposed-to-kick {member: member}))
     proposed (unwrap-panic (if proposed (some true) none))
@@ -802,7 +737,7 @@
 )
 
 (define-private (validate-proposal-for-processing (proposal-index uint))
-  (let ((proposal (unwrap-panic (get-proposal-by-index? (id-queued-proposal proposal-index)))))
+  (let ((proposal (unwrap-panic (get-proposal-by-index? proposal-index))))
     (begin
       (asserts! (< proposal-index  (var-get proposal-queue-length)) (err "proposal does not exist"))
       (asserts! (>= (get-current-period) (get starting-period proposal)) (err "proposal not ready to be processed"))
@@ -813,12 +748,68 @@
 )
 
 ;;
+;; balance related functions
+;;
+(define-read-only (get-user-token-balance (key (tuple (user principal) (token principal))))
+  (default-to u0 (get amount (map-get? user-token-balance key)))
+)
+
+;;
 ;; private functions changing the state
 ;;
 
 ;;
 ;; proposal related functions
 ;;
+
+(define-private (inc-proposal-count)
+  (var-set proposal-count (+ u1 (var-get proposal-count)))
+)
+
+(define-private (inc-proposal-queue-length)
+  (let ((new-length (+ u1 (var-get proposal-queue-length))))
+    (begin
+      (var-set proposal-queue-length new-length)
+      new-length
+    )
+  )
+)
+
+(define-private (add-proposal (user (optional principal)) (shares-requested uint) (loot-requested uint)
+  (tribute-offered uint)
+  (tribute-token <token-trait>)
+  (payment-requested uint)
+  (payment-token <token-trait>)
+  (details (buff 256))
+  (flags (list 6 bool))
+  )
+  (let ((id (+ u1 (var-get proposal-count))))
+    (begin
+      (map-insert proposals {id: id}
+        (
+          (applicant user)
+          (proposer tx-sender)
+          (sponsor none)
+          (shares-requested shares-requested)
+          (loot-requested loot-requested)
+          (tribute-offered tribute-offered)
+          (tribute-token (contract-of tribute-token))
+          (payment-requested payment-requested)
+          (payment-token (contract-of payment-token))
+          (starting-period u0)
+          (yes-votes u0)
+          (no-votes u0)
+          (flags flags)
+          (details details)
+          (max-total-shares-and-loot-at-yes-votes u0)
+        )
+      )
+      (var-set proposal-count id)
+      id
+    )
+  )
+)
+
 (define-private (update-proposal-for-sponsoring (proposal-id uint)
 (proposal (tuple
     (applicant (optional principal))
@@ -1097,13 +1088,16 @@
 )
 
 
+(define-private (inc-total-guild-bank-token-count)
+  (var-set total-guild-bank-token-count (+ (var-get total-guild-bank-token-count) u1))
+)
 
 (define-private (update-total-guild-bank-tokens-for-tribute (tribute-token principal) (amount uint))
   (match (get amount (map-get? user-token-balance {user: guild, token: tribute-token}))
     balance (if (and
                   (is-eq balance u0)
                   (> amount u0))
-                (var-set total-guild-bank-token-count (+ (var-get total-guild-bank-token-count) u1))
+                (inc-total-guild-bank-token-count)
                 true
             )
     true
@@ -1123,6 +1117,52 @@
               )
       true
     )
+)
+
+(define-private (unsafe-add-to-balance (user principal) (token principal) (amount uint))
+  (begin
+    (map-set user-token-balance {user: user, token: token}
+      {amount: (+
+            (default-to u0 (get amount (map-get? user-token-balance {user: user, token: token})))
+            amount)}
+    )
+
+    (map-set user-token-balance {user: total, token: token}
+      {amount: (+
+            (default-to u0 (get amount (map-get? user-token-balance {user: total, token: token})))
+            amount)}
+    )
+  )
+)
+
+(define-private (unsafe-substract-from-balance (user principal) (token principal) (amount uint))
+  (begin
+    (map-set user-token-balance {user: user, token: token}
+      {amount: (-
+            (default-to u0 (get amount (map-get? user-token-balance {user: user, token: token})))
+            amount)}
+    )
+
+    (map-set user-token-balance {user: total, token: token}
+      {amount: (-
+            (default-to u0 (get amount (map-get? user-token-balance {user: total, token: token})))
+            amount)}
+    )
+  )
+)
+
+(define-private (unsafe-internal-transfer (sender principal) (receiver principal) (token principal) (amount uint))
+  (begin
+    (unsafe-substract-from-balance sender token amount)
+    (unsafe-add-to-balance receiver token amount)
+  )
+)
+
+(define-private (return-deposit (sponsor principal))
+  (begin
+    (unsafe-internal-transfer escrow tx-sender deposit-token processing-reward)
+    (unsafe-internal-transfer escrow sponsor deposit-token (- proposal-deposit processing-reward))
+  )
 )
 
 
