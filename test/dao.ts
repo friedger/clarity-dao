@@ -37,7 +37,7 @@ describe("dao contract test suite", () => {
     await daoClient.checkContract();
   });
 
-  describe("deploying an instance of the contract", () => {
+  describe("deploying an instance of the trait and token contract", () => {
     it("should run", async () => {
       await provider.eval(
         "S1G2081040G2081040G2081040G208105NK8PE5.dao-token",

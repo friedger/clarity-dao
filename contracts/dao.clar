@@ -6,8 +6,8 @@
 )
 
 ;; Set properties as you need
-(define-constant period-duration  u17280)
-(define-constant voting-period-length  u35)
+(define-constant period-duration  u10) ;; u10 = 10 sec - u17280 = a day
+(define-constant voting-period-length  u7)
 (define-constant grace-period-length  u35)
 (define-constant proposal-deposit u100000)
 (define-constant dilution-bound  u10)
@@ -28,6 +28,7 @@
 (define-constant total .dao-token-trait) ;; only used as map key
 (define-constant escrow .dao-token) ;; only used as map key
 
+(define-constant standard-flags (list false false false false false false))
 (define-constant whitelist-flags (list false false false false true false))
 (define-constant guild-kick-flags (list false false false false false true))
 
@@ -79,6 +80,26 @@
       (jailed u0)
     )
   )
+
+  (map-insert members ((member 'ST26FVX16539KKXZKJN098Q08HRX3XBAP541MFS0P))
+    (
+      (delegate-key 'ST26FVX16539KKXZKJN098Q08HRX3XBAP541MFS0P)
+      (shares u1)
+      (loot u0)
+      (highest-index-yes-vote u0)
+      (jailed u0)
+    )
+  )
+
+  (map-insert members ((member 'ST3CECAKJ4BH08JYY7W53MC81BYDT4YDA5M7S5F53))
+    (
+      (delegate-key 'ST3CECAKJ4BH08JYY7W53MC81BYDT4YDA5M7S5F53)
+      (shares u1)
+      (loot u0)
+      (highest-index-yes-vote u0)
+      (jailed u0)
+    )
+  )
 )
 
 (define-map member-by-delegate-key ((delegate-key principal))
@@ -93,6 +114,12 @@
 (begin
  (map-insert member-by-delegate-key ((delegate-key tx-sender))
     ((member tx-sender))
+  )
+ (map-insert member-by-delegate-key ((delegate-key 'ST26FVX16539KKXZKJN098Q08HRX3XBAP541MFS0P))
+    ((member 'ST26FVX16539KKXZKJN098Q08HRX3XBAP541MFS0P))
+  )
+ (map-insert member-by-delegate-key ((delegate-key 'ST3CECAKJ4BH08JYY7W53MC81BYDT4YDA5M7S5F53))
+    ((member 'ST3CECAKJ4BH08JYY7W53MC81BYDT4YDA5M7S5F53))
   )
 )
 
@@ -141,19 +168,21 @@
         (payment-token <token-trait>)
         (details (buff 256)))
   (begin
-    (unwrap-panic (if (< (+ shares-requested loot-requested) max-number-of-shares-and-loot) (some true) none))
-    (unwrap-panic (map-get? token-whitelist ((token (contract-of tribute-token)))))
-    (unwrap-panic (map-get? token-whitelist ((token (contract-of payment-token)))))
-    (unwrap-panic (match (get jailed (map-get? members ((member applicant))))
+    (unwrap! (if (< (+ shares-requested loot-requested) max-number-of-shares-and-loot) (some true) none) (err "max shares and loot exeeded"))
+    (unwrap! (map-get? token-whitelist ((token (contract-of tribute-token)))) (err "tribute token not whitelisted"))
+    (unwrap! (map-get? token-whitelist ((token (contract-of payment-token)))) (err "payment token not whitelisted"))
+    (unwrap! (match (get jailed (map-get? members ((member applicant))))
                   jailed (if (is-eq jailed u0) (some true) none)
                   none
                 )
+                (err "member jailed")
     )
+    (unwrap! (if (> tribute-offered u0) (some true) none) (err "tribute must not be 0"))
     (require-not-too-many-guild-tokens tribute-offered (contract-of tribute-token))
 
-    (unwrap-panic (contract-call? tribute-token transfer? tribute-offered tx-sender (as-contract tx-sender)))
+    (unwrap! (print (contract-call? tribute-token transfer? tribute-offered tx-sender (as-contract tx-sender))) (err "transfer failed"))
     (unsafe-add-to-balance escrow (contract-of tribute-token) tribute-offered)
-    (ok (add-proposal (some applicant) shares-requested loot-requested tribute-offered tribute-token payment-requested payment-token details (list)))
+    (ok (add-proposal (some applicant) shares-requested loot-requested tribute-offered tribute-token payment-requested payment-token details standard-flags))
   )
 )
 
@@ -181,7 +210,7 @@
 
 (define-public (sponsor-proposal (proposal-id uint))
   (begin
-    (unwrap-panic (contract-call? .dao-token transfer? proposal-deposit tx-sender escrow))
+    (unwrap! (print (contract-call? .dao-token transfer? proposal-deposit tx-sender (as-contract tx-sender))) (err "transfer failed"))
     (unsafe-add-to-balance escrow deposit-token proposal-deposit)
     (let ((proposal (unwrap-panic (map-get? proposals {id: proposal-id}))))
       (begin
@@ -231,14 +260,14 @@
 ;;
 (define-public (submit-vote (proposal-index uint) (vote (optional bool)))
   (let (
-      (proposal (unwrap-panic (get-proposal-by-index? proposal-index)))
-      (member (unwrap-panic (get member (map-get? member-by-delegate-key {delegate-key: tx-sender}))))
+      (proposal (unwrap-panic (print (get-proposal-by-index? proposal-index))))
+      (member (unwrap-panic (print (get member (map-get? member-by-delegate-key {delegate-key: tx-sender})))))
     )
     (let (
         (starting-period (get starting-period proposal))
       )
       (begin
-        (require-no-vote (map-get? votes-by-member {proposal-index: proposal-index, member: member}))
+        (require-no-vote (print (map-get? votes-by-member {proposal-index: proposal-index, member: member})))
         (require-in-voting-period starting-period)
         (require-true (map-insert votes-by-member {proposal-index: proposal-index, member: member} {vote: vote}))
         (match vote
@@ -437,7 +466,7 @@
 (define-public (collect-tokens (token <token-trait>))
   (begin
     (require-delegate)
-    (let ((amount-to-collect (unwrap-panic (contract-call? token balance-of (as-contract tx-sender)))))
+    (let ((amount-to-collect (unwrap-panic (contract-call? token get-balance (as-contract tx-sender)))))
         (begin
           (require-true (> amount-to-collect u0))
           (require-true (is-some (map-get? token-whitelist {token: (contract-of token)})))
@@ -598,7 +627,7 @@
 ;;
 
 (define-private (require-true (value bool))
-  (unwrap-panic (if value (some true) none))
+  (unwrap-panic (if (print value) (some true) none))
 )
 
 (define-private (require-no-vote (value (optional (tuple (vote (optional bool))))))
@@ -732,7 +761,14 @@
 ;;
 ;; proposal related functions
 ;;
+
+(define-read-only (get-proposal-by-id? (proposal-id uint))
+  ;; proposal-id is >= proposal-index because some proposal might not be processed
+  (map-get? proposals {id: proposal-id})
+)
+
 (define-read-only (get-proposal-by-index? (proposal-index uint))
+  ;; only processed proposals have a proposal index
   (map-get? proposals {id: (id-queued-proposal proposal-index)})
 )
 

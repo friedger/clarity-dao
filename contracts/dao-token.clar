@@ -6,6 +6,11 @@
   (ft-transfer? dao-token amount sender recipient)
 )
 
-(define-read-only (balance-of (principal principal))
+(define-read-only (get-balance (principal principal))
   (ok (ft-get-balance dao-token principal))
+)
+
+(define-public (faucet)
+  ;; 10x proposal deposit
+  (ft-mint? dao-token u1000000 tx-sender)
 )

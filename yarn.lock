@@ -17,27 +17,27 @@
   resolved "https://registry.yarnpkg.com/@blockstack/clarity/-/clarity-0.3.0.tgz#ba856cc343778e8469fb9e6be7caf7025eb0e3af"
   integrity sha512-XhoCrmNSv85Fp5BgoQbO4LK6s6c9tOQEl5svcDS/G3yjXA4LcPOu/TtZm2AcGTf6leu/9SydbWcP7JIKINTyxA==
 
-"@stacks/common@^1.0.0-beta.17":
-  version "1.0.0-beta.17"
-  resolved "https://registry.yarnpkg.com/@stacks/common/-/common-1.0.0-beta.17.tgz#46ea11aeba821644bc00ed9abc8d996238a6aeb2"
-  integrity sha512-5jgwzeaX5cw92rQHiQCT4ojjNFnKdDkQmfTE5EGe2skqivoyEIbLBzErhV5XpHQo+w8s0Zb9GPZFy2LhrbPRhQ==
+"@stacks/common@^1.0.0-beta.18":
+  version "1.0.0-beta.18"
+  resolved "https://registry.yarnpkg.com/@stacks/common/-/common-1.0.0-beta.18.tgz#18656b347249977ad346c4eff2c9fe6196560ef1"
+  integrity sha512-sxGIpcFu6suAHmufsVaQK6nAaZg6N3v07A7I8twpytvECYZ845yvjUSqIWoL/kRjbsy771CRBu7QOmOVxQ53Cg==
   dependencies:
     cross-fetch "^3.0.5"
 
-"@stacks/network@^1.0.0-beta.17":
-  version "1.0.0-beta.17"
-  resolved "https://registry.yarnpkg.com/@stacks/network/-/network-1.0.0-beta.17.tgz#440d10191bb9ec8f4e1b2ce2ae08a77b2a55f128"
-  integrity sha512-8cOPN685hLRzb2eFPfqzTMuNpuF2NmpXRLV2Cxr7u81KdrLQL+Z8d583KWbw2bM12Azxz1D4WckeSisO0xTghg==
+"@stacks/network@^1.0.0-beta.18":
+  version "1.0.0-beta.18"
+  resolved "https://registry.yarnpkg.com/@stacks/network/-/network-1.0.0-beta.18.tgz#41d667d045c7d04082841fb284df028f5f4f6df2"
+  integrity sha512-I/Kss2+iO9sqFIYxf68dKjmi7+4nzx37HdSJwNP+6+CQoYQxHkYqsi0W4vEUqzXGckp5geihon3Ndf0kFOJ/AA==
   dependencies:
-    "@stacks/common" "^1.0.0-beta.17"
+    "@stacks/common" "^1.0.0-beta.18"
 
-"@stacks/transactions@^1.0.0-beta.17":
-  version "1.0.0-beta.17"
-  resolved "https://registry.yarnpkg.com/@stacks/transactions/-/transactions-1.0.0-beta.17.tgz#ae0d5b31772e4c377451a644e965084b86d025eb"
-  integrity sha512-D/2O/eYPu96bLcQ8pcGiqDnUWyOsAruN9m1zwPBUivXw7SYmtBPiorPSMCYwsmaJuhu4S6kyJLAa4z+0i7VVQQ==
+"@stacks/transactions@^1.0.0-beta.18":
+  version "1.0.0-beta.18"
+  resolved "https://registry.yarnpkg.com/@stacks/transactions/-/transactions-1.0.0-beta.18.tgz#6c139d822a3ae5e2648b1931a992861dc640a8dd"
+  integrity sha512-5VIB15l7OorQHXSwanYM/xNURoPds0jhWaW4bZnLspEioBbvYw4UGSNnqq5F8+A3G3nBf2uph69295tBO2cxqQ==
   dependencies:
-    "@stacks/common" "^1.0.0-beta.17"
-    "@stacks/network" "^1.0.0-beta.17"
+    "@stacks/common" "^1.0.0-beta.18"
+    "@stacks/network" "^1.0.0-beta.18"
     "@types/bn.js" "^4.11.6"
     "@types/elliptic" "^6.4.12"
     "@types/randombytes" "^2.0.0"
