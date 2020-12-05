@@ -1,0 +1,10 @@
+image:
+  file: .gitpod.Dockerfile
+
+tasks:
+  - init: yarn
+
+vscode:
+  extensions:
+    - blockstack.clarity@0.0.5:rBhb1NsIYs1/wpFyiyXNdA==
+    - 2gua.rainbow-brackets@0.0.6:Tbu8dTz0i+/bgcKQTQ5b8g==
