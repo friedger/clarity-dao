@@ -74,7 +74,15 @@ yarn mocha test/proposal-life-cycle.ts
 
 Currently, there is not working UI. Some work to adapt https://daohaus.club to support Moloch DAOs on the Stacks chain has been started.
 
-The application can be used
+![ui](images/ui.jpg)
+
+The application can be used with mocha tests:
+
+1. get tokens from faucet: `yarn mocha -g "faucet"`
+1. submit proposal: `yarn mocha -g "submit proposal"`
+1. sponsor proposal: `yarn mocha -g "sponsor proposal"`
+1. submit votes: `yarn mocha -g "submit votes"`
+1. process proposal: `yarn mocha -g "process proposal"`
 
 ### Remarks
 
