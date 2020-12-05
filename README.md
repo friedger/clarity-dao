@@ -10,7 +10,7 @@ Moloch DAO is a grant-making internet community contract that can hold multiple 
 
 It has a small set of features to make it understandable and less error prone. It has been described in various places and forms:
 
-- [(First github repository](https://github.com/austintgriffith/moloch)
+- [First github repository](https://github.com/austintgriffith/moloch)
 - [Audio](https://epicenter.tv/episodes/297/)
 - [FAQ](https://daohaus.club/help#xDAI)
 - [Primer for humans](https://medium.com/raid-guild/moloch-evolved-v2-primer-25c9cdeab455)
