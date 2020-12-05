@@ -74,7 +74,7 @@ yarn mocha test/proposal-life-cycle.ts
 
 Currently, there is not working UI. Some work to adapt https://daohaus.club to support Moloch DAOs on the Stacks chain has been started.
 
-![ui](images/ui.jpg)
+![ui](images/ui.png)
 
 The application can be used with mocha tests:
 
