@@ -70,11 +70,13 @@ After the contracts are deployed (due to the length of the dao contract it takes
 yarn mocha test/proposal-life-cycle.ts
 ```
 
-### Application
+### Application as Web App
 
-Currently, there is not working UI. Some work to adapt https://daohaus.club to support Moloch DAOs on the Stacks chain has been started.
+Currently, there is not working UI. Some work to adapt https://daohaus.club to support Moloch DAOs on the Stacks chain has been started at [friedger/daohaus-web](https://github.com/friedger/daohaus-web) and [friedger/pokemol-web](https://github.com/friedger/pokemol-web). It also requires modications of stacks-node-api to better match the moloch server API. This is still work to be done.
 
 ![ui](images/ui.png)
+
+### Application as CLI
 
 The application can be used with mocha tests:
 
@@ -83,6 +85,8 @@ The application can be used with mocha tests:
 1. sponsor proposal: `yarn mocha -g "sponsor proposal"`
 1. submit votes: `yarn mocha -g "submit votes"`
 1. process proposal: `yarn mocha -g "process proposal"`
+
+[Explainer video](https://youtu.be/TFWVJDcsD24)
 
 ### Remarks
 
